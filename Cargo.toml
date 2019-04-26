@@ -1,0 +1,8 @@
+[package]
+name = "rhessian"
+version = "0.1.0"
+authors = ["zhangliming <zhangliming@dianwoba.com>"]
+edition = "2018"
+
+[dependencies]
+bytes = "0.4.12"
