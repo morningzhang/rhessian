@@ -79,14 +79,31 @@ mod hessian {
                 return Some(Box::new(buf.get_i32_be()));
             }
 
-            //string
+            //string todo:1.take不移动指针；2.多个拼接的时候可能会乱码
             else if 0x00 <= code && code <= 0x1f {
-                let s=buf.take(code as usize);
-                return Some(Box::new( str::from_utf8(s.bytes()).unwrap().to_string()));
+                let s = buf.take(code as usize);
+                return Some(Box::new(str::from_utf8(s.bytes()).unwrap().to_string()));
             } else if 0x30 <= code && code <= 0x33 {
-                let b0=buf.get_u8();
-                let s=buf.take(b0 as usize);
-                return Some(Box::new( str::from_utf8(s.bytes()).unwrap().to_string()));
+                let b0 = buf.get_u8();
+                let s = buf.take(b0 as usize);
+                return Some(Box::new(str::from_utf8(s.bytes()).unwrap().to_string()));
+            } else if code == b'S' {
+                let str_len = buf.get_u16_be();
+                let s = buf.take(str_len as usize);
+                return Some(Box::new(str::from_utf8(s.bytes()).unwrap().to_string()));
+            } else if code == b'R' {
+                let str_len = buf.get_u16_be();
+                let s = buf.take(str_len as usize);
+
+                let mut this_part = str::from_utf8(s.bytes()).unwrap().to_string();
+
+                while let other_part = read_string(buf.get_u8(), buf) {
+                    if other_part.is_none() {
+                        break;
+                    }
+                    this_part.push_str(&*other_part.unwrap())
+                }
+                return Some(Box::new(this_part));
             }
 
 
@@ -94,12 +111,36 @@ mod hessian {
         }
 
 
+        fn read_string(code: u8, buf: &mut Buf) -> Option<String> {
+            if 0x00 <= code && code <= 0x1f {
+                let s = buf.take(code as usize);
+                return Some(str::from_utf8(s.bytes()).unwrap().to_string());
+            } else if 0x30 <= code && code <= 0x33 {
+                let b0 = buf.get_u8();
+                let s = buf.take(b0 as usize);
+                return Some(str::from_utf8(s.bytes()).unwrap().to_string());
+            } else if code == b'S' {
+                let str_len = buf.get_u16_be();
+                let s = buf.take(str_len as usize);
+                return Some(str::from_utf8(s.bytes()).unwrap().to_string());
+            } else if code == b'R' {
+                let str_len = buf.get_u16_be();
+                let s = buf.take(str_len as usize);
+                return Some(str::from_utf8(s.bytes()).unwrap().to_string());
+            }
+
+            return None;
+        }
+
+
+
+
         #[test]
         fn test_bool() {
-            let mut buf =  b"T".into_buf();
+            let mut buf = b"T".into_buf();
             assert_eq!(true, *read_object(&mut buf).unwrap().downcast_ref::<bool>().unwrap());
 
-            let mut buf =  b"F".into_buf();
+            let mut buf = b"F".into_buf();
             assert_eq!(false, *read_object(&mut buf).unwrap().downcast_ref::<bool>().unwrap());
         }
 
@@ -133,86 +174,129 @@ mod hessian {
         #[test]
         fn test_double() {
             //1byte
-            let tests = vec![(b"\x5b",0.0),(b"\x5c",1.0)];
+            let tests = vec![(b"\x5b", 0.0), (b"\x5c", 1.0)];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<f32>().unwrap());
             }
             //2byte
-            let tests = vec![(b"\x5d\x80",-128.0),(b"\x5d\x7f",127.0)];
+            let tests = vec![(b"\x5d\x80", -128.0), (b"\x5d\x7f", 127.0)];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<f32>().unwrap());
             }
             //3byte
-            let tests = vec![(b"\x5e\x00\x00",0.0),(b"\x5e\x80\x00",-32768.0),(b"\x5e\x7f\xff",32767.0)];
+            let tests = vec![(b"\x5e\x00\x00", 0.0), (b"\x5e\x80\x00", -32768.0), (b"\x5e\x7f\xff", 32767.0)];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<f32>().unwrap());
             }
 
             //8byte
-            let tests = vec![(b"D\x40\x28\x80\x00\x00\x00\x00\x00",12.25)];
+            let tests = vec![(b"D\x40\x28\x80\x00\x00\x00\x00\x00", 12.25)];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<f64>().unwrap());
             }
-
         }
 
         #[test]
         fn test_long() {
             //1byte
-            let tests = vec![(b"\xe0",0),(b"\xd8",-8),(b"\xef",15)];
+            let tests = vec![(b"\xe0", 0), (b"\xd8", -8), (b"\xef", 15)];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<i16>().unwrap());
             }
 
             //2byte
-            let tests = vec![(b"\xf8\x00",0),(b"\xf0\x00",-2048),(b"\xf7\x00",-256),(b"\xff\xff",2047)];
+            let tests = vec![(b"\xf8\x00", 0), (b"\xf0\x00", -2048), (b"\xf7\x00", -256), (b"\xff\xff", 2047)];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<i16>().unwrap());
             }
 
             //3byte
-            let tests = vec![(b"\x3c\x00\x00",0),(b"\x38\x00\x00",-262144),(b"\x3f\xff\xff",262143)];
+            let tests = vec![(b"\x3c\x00\x00", 0), (b"\x38\x00\x00", -262144), (b"\x3f\xff\xff", 262143)];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<i32>().unwrap());
             }
             //8byte
-            let tests = vec![(b"L\x00\x00\x00\x00\x00\x00\x01\x2c",300)];
+            let tests = vec![(b"L\x00\x00\x00\x00\x00\x00\x01\x2c", 300)];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<i64>().unwrap());
             }
 
             //4byte
-            let tests = vec![(b"\x59\x00\x00\x00\x00",0),(b"\x59\x00\x00\x01\x2c",300)];
+            let tests = vec![(b"\x59\x00\x00\x00\x00", 0), (b"\x59\x00\x00\x01\x2c", 300)];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<i32>().unwrap());
             }
-
         }
 
 
         #[test]
-        fn test_string(){
-            let tests = vec![(b"\x00","")];
+        fn test_string() {
+            let tests = vec![(b"\x00", "")];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 assert_eq!(t.1, *read_object(&mut buf).unwrap().downcast_ref::<String>().unwrap());
             }
-            let tests = vec![("\x05我".as_bytes(),"我")];
+            let tests = vec![("\x05我".as_bytes(), "我")];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
-                let obj=read_object(&mut buf).unwrap();
-                let s=obj.downcast_ref::<String>().unwrap();
+                let obj = read_object(&mut buf).unwrap();
+                let s = obj.downcast_ref::<String>().unwrap();
                 assert_eq!(t.1, *s);
             }
+
+
+            let tests = vec![(b"\x01\xc3\x83", "\\u00c3")];
+            for t in tests.iter() {
+                let mut buf = t.0.into_buf();
+                let obj = read_object(&mut buf).unwrap();
+                let s = obj.downcast_ref::<String>().unwrap();
+                assert_eq!(t.1, *s);
+            }
+
+            let tests = vec![(b"\x52\x00\x07hello, \x05world","hello, world")];
+            for t in tests.iter() {
+                let mut buf = t.0.into_buf();
+                let obj = read_object(&mut buf).unwrap();
+                let s = obj.downcast_ref::<String>().unwrap();
+                assert_eq!(t.1, *s);
+            }
+
+        }
+
+        #[test]
+        fn test_string1() {
+
+            let tests = vec![(b"\x01\xc3\x83", "\\u00c3")];
+            for t in tests.iter() {
+                let mut buf = t.0.into_buf();
+                let obj = read_object(&mut buf).unwrap();
+                let s = obj.downcast_ref::<String>().unwrap();
+                assert_eq!(t.1, *s);
+            }
+
+
+        }
+
+        #[test]
+        fn test_string2() {
+
+            let tests = vec![(b"\x52\x00\x07hello, \x05world","hello, world")];
+            for t in tests.iter() {
+                let mut buf = t.0.into_buf();
+                let obj = read_object(&mut buf).unwrap();
+                let s = obj.downcast_ref::<String>().unwrap();
+                assert_eq!(t.1, *s);
+            }
+
         }
     }
 }
