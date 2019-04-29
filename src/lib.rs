@@ -79,31 +79,42 @@ mod hessian {
                 return Some(Box::new(buf.get_i32_be()));
             }
 
-            //string todo:1.take不移动指针；2.多个拼接的时候可能会乱码
+            //string
             else if 0x00 <= code && code <= 0x1f {
-                let s = buf.take(code as usize);
-                return Some(Box::new(str::from_utf8(s.bytes()).unwrap().to_string()));
+                let s = buf.bytes().get(..code as usize).unwrap();
+                //buf.advance(code as usize);
+                return Some(Box::new(str::from_utf8(s).unwrap().to_string()));
             } else if 0x30 <= code && code <= 0x33 {
                 let b0 = buf.get_u8();
-                let s = buf.take(b0 as usize);
-                return Some(Box::new(str::from_utf8(s.bytes()).unwrap().to_string()));
+                let s = buf.bytes().get(..b0 as usize).unwrap();
+                //buf.advance(b0 as usize);
+                return Some(Box::new(str::from_utf8(s).unwrap().to_string()));
             } else if code == b'S' {
                 let str_len = buf.get_u16_be();
-                let s = buf.take(str_len as usize);
-                return Some(Box::new(str::from_utf8(s.bytes()).unwrap().to_string()));
+                let s = buf.bytes().get(..str_len as usize).unwrap();
+                //buf.advance(str_len as usize);
+                return Some(Box::new(str::from_utf8(s).unwrap().to_string()));
             } else if code == b'R' {
                 let str_len = buf.get_u16_be();
-                let s = buf.take(str_len as usize);
+                let s = buf.bytes().get(..str_len as usize).unwrap();
+                //buf.advance(str_len as usize);
 
-                let mut this_part = str::from_utf8(s.bytes()).unwrap().to_string();
+                let mut s_str =s.to_vec();
 
-                while let other_part = read_string(buf.get_u8(), buf) {
-                    if other_part.is_none() {
+                let mut res_str = vec![];
+                res_str.append(&mut s_str);
+
+                loop {
+                    let (is_ending,_other_str_len,  other_part) = read_string(buf.bytes()[0], buf);
+                    if other_part.is_none() == false {
+
+                        res_str.append(&mut other_part.unwrap().to_vec());
+                    }
+                    if is_ending == true {
                         break;
                     }
-                    this_part.push_str(&*other_part.unwrap())
-                }
-                return Some(Box::new(this_part));
+                };
+                return Some(Box::new(str::from_utf8(res_str.as_slice()).unwrap().to_string()));
             }
 
 
@@ -111,28 +122,35 @@ mod hessian {
         }
 
 
-        fn read_string(code: u8, buf: &mut Buf) -> Option<String> {
+
+        fn read_string(code: u8, buf: & mut Buf) -> (bool, u16, Option<&[u8]>) {
             if 0x00 <= code && code <= 0x1f {
-                let s = buf.take(code as usize);
-                return Some(str::from_utf8(s.bytes()).unwrap().to_string());
+                buf.advance(1);
+                let s = buf.bytes().get(..code as usize).unwrap();
+               // buf.advance(code as usize);
+                return (true, code as u16, Some(s));
             } else if 0x30 <= code && code <= 0x33 {
+                buf.advance(1);
                 let b0 = buf.get_u8();
-                let s = buf.take(b0 as usize);
-                return Some(str::from_utf8(s.bytes()).unwrap().to_string());
+                let s = buf.bytes().get(..b0 as usize).unwrap();
+                //buf.advance(b0 as usize);
+                return (true, b0 as u16, Some(s));
             } else if code == b'S' {
+                buf.advance(1);
                 let str_len = buf.get_u16_be();
-                let s = buf.take(str_len as usize);
-                return Some(str::from_utf8(s.bytes()).unwrap().to_string());
+                let s = buf.bytes().get(..str_len as usize).unwrap();
+                //buf.advance(str_len as usize);
+                return (true, str_len as u16, Some(s));
             } else if code == b'R' {
+                buf.advance(1);
                 let str_len = buf.get_u16_be();
-                let s = buf.take(str_len as usize);
-                return Some(str::from_utf8(s.bytes()).unwrap().to_string());
+                let s = buf.bytes().get(..str_len as usize).unwrap();
+               // buf.advance(str_len as usize);
+                return (false, str_len as u16, Some(s));
             }
 
-            return None;
+            return (true, 0, None);
         }
-
-
 
 
         #[test]
@@ -262,19 +280,17 @@ mod hessian {
                 assert_eq!(t.1, *s);
             }
 
-            let tests = vec![(b"\x52\x00\x07hello, \x05world","hello, world")];
+            let tests = vec![(b"\x52\x00\x07hello, \x05world", "hello, world")];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 let obj = read_object(&mut buf).unwrap();
                 let s = obj.downcast_ref::<String>().unwrap();
                 assert_eq!(t.1, *s);
             }
-
         }
 
         #[test]
         fn test_string1() {
-
             let tests = vec![(b"\x01\xc3\x83", "\\u00c3")];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
@@ -282,21 +298,17 @@ mod hessian {
                 let s = obj.downcast_ref::<String>().unwrap();
                 assert_eq!(t.1, *s);
             }
-
-
         }
 
         #[test]
         fn test_string2() {
-
-            let tests = vec![(b"\x52\x00\x07hello, \x05world","hello, world")];
+            let tests = vec![(b"\x52\x00\x07hello, \x05world", "hello, world")];
             for t in tests.iter() {
                 let mut buf = t.0.into_buf();
                 let obj = read_object(&mut buf).unwrap();
                 let s = obj.downcast_ref::<String>().unwrap();
                 assert_eq!(t.1, *s);
             }
-
         }
     }
 }
